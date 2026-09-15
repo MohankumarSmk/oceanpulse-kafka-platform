@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>OceanPulse Control Room</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    body { margin:0; background:#08111f; color:#e5eefc; }
+    .wrap { max-width:1200px; margin:auto; padding:28px; }
+    h1 { margin:0; font-size:32px; letter-spacing:.4px; }
+    .sub { color:#8fa7c7; margin:8px 0 24px; }
+    .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+    .card { background:#101c2f; border:1px solid #20324e; border-radius:16px; padding:18px; }
+    .label { color:#87a2c6; font-size:12px; text-transform:uppercase; letter-spacing:1px; }
+    .value { font-size:26px; font-weight:700; margin-top:8px; }
+    .green { color:#58e6a9; } .red { color:#ff7b86; }
+    .panel { margin-top:16px; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th,td { padding:11px 9px; text-align:left; border-bottom:1px solid #20324e; }
+    th { color:#87a2c6; font-weight:600; }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; background:#173352; }
+    @media (max-width:800px) { .grid { grid-template-columns:1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>OceanPulse</h1>
+    <div class="sub">Real-time maritime Kafka control room — v0.1</div>
+
+    <div class="grid">
+      <div class="card"><div class="label">WebSocket</div><div id="status" class="value red">Connecting</div></div>
+      <div class="card"><div class="label">Events Seen</div><div id="count" class="value">0</div></div>
+      <div class="card"><div class="label">Last Partition</div><div id="partition" class="value">—</div></div>
+      <div class="card"><div class="label">Last Offset</div><div id="offset" class="value">—</div></div>
+    </div>
+
+    <div class="card panel">
+      <div class="label">Live Kafka Events</div>
+      <table>
+        <thead><tr><th>Time</th><th>Vessel</th><th>Engine</th><th>Channel</th><th>Value</th><th>Kafka</th></tr></thead>
+        <tbody id="events"></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+let count = 0;
+const statusEl = document.getElementById("status");
+const tbody = document.getElementById("events");
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws/events`);
+
+  ws.onopen = () => {
+    statusEl.textContent = "LIVE";
+    statusEl.className = "value green";
+    ws.send("ready");
+  };
+
+  ws.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    count++;
+    document.getElementById("count").textContent = count.toLocaleString();
+    document.getElementById("partition").textContent = `P${d._partition}`;
+    document.getElementById("offset").textContent = d._offset;
+
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${new Date(d.timestamp).toLocaleTimeString()}</td>
+      <td>${d.vessel_id}</td>
+      <td>${d.engine_id}</td>
+      <td>${d.channel}</td>
+      <td>${d.value} ${d.unit}</td>
+      <td><span class="pill">P${d._partition} · O${d._offset}</span></td>`;
+    tbody.prepend(row);
+    while (tbody.children.length > 20) tbody.lastChild.remove();
+  };
+
+  ws.onclose = () => {
+    statusEl.textContent = "RECONNECTING";
+    statusEl.className = "value red";
+    setTimeout(connect, 1500);
+  };
+}
+connect();
+</script>
+</body>
+</html>
