@@ -20,10 +20,10 @@ describe:
 	  --describe --topic oceanpulse.telemetry.raw.v1
 
 producer:
-	python services/producer.py
+	python -m services.producer
 
 consumer:
-	python services/consumer.py
+	python -m services.consumer
 
 web:
 	uvicorn web.app:app --host 0.0.0.0 --port 8000 --reload
