@@ -75,26 +75,33 @@ LAG = LOG-END-OFFSET - CURRENT-OFFSET
 lag grows
 ```
 
-## What this proves
-1. Kafka retains records even when a consumer is offline.
-2. Consumer progress is independent from producer progress.
-3. Consumer lag is backlog, not data loss.
-4. A consumer can later resume from the group's committed offsets.
-
 ## Phase 2 — Drain the lag
-This phase is intentionally completed after Phase 1 so the recovery can be observed separately.
 
 ### Step 4 — Start the consumer
 ```bash
 make consumer
 ```
 
-The consumer should resume from the group's committed offsets and process the backlog.
+The consumer resumed from the group's committed offsets and processed the retained backlog.
 
-### Step 5 — Let it catch up, then stop it
-Use `Ctrl+C` after the backlog has drained.
+### Actual replayed ranges
 
-### Step 6 — Inspect lag again
+| Partition | Replayed offsets | Records |
+|---:|---|---:|
+| 0 | 588–596 | 9 |
+| 1 | 1264–1278 | 15 |
+| 3 | 580–594 | 15 |
+| 4 | 564–576 | 13 |
+| 5 | 1738–1770 | 33 |
+
+**Total replayed backlog: 85 records.**
+
+This exactly matched the lag measured before restart.
+
+### Step 5 — Stop the consumer after catch-up
+Use `Ctrl+C` once the backlog has drained.
+
+### Step 6 — Verify lag again
 ```bash
 docker exec oceanpulse-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
   --bootstrap-server localhost:9092 \
@@ -102,8 +109,24 @@ docker exec oceanpulse-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
   --group oceanpulse-terminal-v1
 ```
 
-### Expected recovery result
-The lag for the active partitions should move back toward `0` if the consumer processes all retained records successfully.
+## Final observed result
+
+| Partition | Current Offset | Log End Offset | Lag |
+|---:|---:|---:|---:|
+| 0 | 597 | 597 | 0 |
+| 1 | 1279 | 1279 | 0 |
+| 3 | 595 | 595 | 0 |
+| 4 | 577 | 577 | 0 |
+| 5 | 1771 | 1771 | 0 |
+
+Kafka again reported no active members because the consumer had already been stopped before this inspection.
+
+## What this proves
+1. Kafka retained the producer backlog while the consumer was offline.
+2. The same consumer group resumed from its committed offsets rather than replaying everything from the beginning.
+3. The measured backlog of 85 records was exactly the backlog later consumed.
+4. Once those records were processed and committed, lag returned to zero.
+5. Consumer lag is measurable backlog, not evidence of data loss by itself.
 
 ## Production lesson
 Consumer lag is one of the most important Kafka health signals. A growing lag can mean:
@@ -118,4 +141,4 @@ A production system should monitor lag per partition and per consumer group rath
 ## Interview takeaway
 A concise explanation:
 
-> Kafka consumers track progress with committed offsets. If producers keep appending while the consumer is stopped, the log-end offsets move forward while committed offsets stay fixed, so lag grows. When the consumer restarts with the same group, it resumes from the committed offsets and drains the backlog.
+> Kafka consumers track progress with committed offsets. If producers keep appending while the consumer is stopped, the log-end offsets move forward while committed offsets stay fixed, so lag grows. When the consumer restarts with the same group, it resumes from the committed offsets and drains the backlog. In this lab, lag grew to 85 records and returned to zero after restart.
