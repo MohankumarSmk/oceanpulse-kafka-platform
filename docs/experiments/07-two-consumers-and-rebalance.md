@@ -12,7 +12,7 @@ Prove how Kafka distributes partitions across two consumers in the same consumer
 
 Both consumers use the same `group.id`, so Kafka treats them as members of one consumer group.
 
-## Step 1 — Start two consumers
+## Phase 1 — Start two consumers
 
 Terminal 1:
 ```bash
@@ -24,7 +24,7 @@ Terminal 2:
 make consumer
 ```
 
-## Step 2 — Inspect the group
+Inspect the group:
 
 ```bash
 docker exec oceanpulse-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
@@ -33,7 +33,7 @@ docker exec oceanpulse-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
   --group oceanpulse-terminal-v1
 ```
 
-## Observed assignment
+## Observed assignment with two consumers
 
 | Consumer ID | Assigned partitions |
 |---|---|
@@ -41,8 +41,6 @@ docker exec oceanpulse-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
 | `rdkafka-df51cff6-57f3-4575-aedd-be9a1d2826df` | 0, 1, 2 |
 
 This run produced an even 3/3 partition split.
-
-The populated partitions were fully caught up at inspection time:
 
 | Partition | Current Offset | Log End Offset | Lag |
 |---:|---:|---:|---:|
@@ -54,36 +52,15 @@ The populated partitions were fully caught up at inspection time:
 | 5 | 2240 | 2240 | 0 |
 
 ## Important observation about partition 2
-Partition 2 has no records (`LOG-END-OFFSET = 0`) and no committed offset yet, but Kafka still assigned it to a consumer.
+Partition 2 had no records (`LOG-END-OFFSET = 0`) and no committed offset yet, but Kafka still assigned it to a consumer.
 
 Kafka assigns **partitions**, not only partitions that currently contain records.
 
-## What this proves
-1. Starting another consumer process with the same `group.id` adds another member to the same consumer group.
-2. Kafka redistributes partitions when group membership changes.
-3. A partition is assigned to only one active consumer within a group at a time.
-4. With six partitions and two consumers, Kafka can distribute three partitions to each consumer.
-5. Empty partitions still participate in consumer-group assignment.
+## Phase 2 — Stop one consumer and observe rebalance
 
-## Mental model
+The consumer owning partitions 3, 4 and 5 was stopped with `Ctrl+C`.
 
-```text
-6 partitions
-      ↓
-consumer group
-      ↓
-Consumer A      Consumer B
-P0 P1 P2        P3 P4 P5
-```
-
-The exact consumer-to-partition mapping may change during later rebalances.
-
-## Phase 2 — Consumer leaves and Kafka rebalances
-
-### Next step
-Stop the consumer currently handling partitions 3, 4 and 5 with `Ctrl+C`.
-
-Then inspect the group again:
+The group was inspected again:
 
 ```bash
 docker exec oceanpulse-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
@@ -92,8 +69,50 @@ docker exec oceanpulse-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
   --group oceanpulse-terminal-v1
 ```
 
-### Expected result
-The remaining consumer should receive the partitions previously owned by the stopped consumer, demonstrating a consumer-group rebalance and failover of partition ownership.
+## Final observed assignment after Consumer B stopped
+
+Only one consumer remained:
+
+`rdkafka-f30d844c-fd30-4e5a-81ae-b805a9c019f9`
+
+Kafka reassigned all six partitions to that remaining consumer:
+
+| Partition | Current Offset | Log End Offset | Lag |
+|---:|---:|---:|---:|
+| 0 | 761 | 761 | 0 |
+| 1 | 1630 | 1630 | 0 |
+| 2 | - | 0 | - |
+| 3 | 770 | 770 | 0 |
+| 4 | 769 | 769 | 0 |
+| 5 | 2299 | 2299 | 0 |
+
+## Rebalance sequence
+
+```text
+Before:
+Consumer A → P0 P1 P2
+Consumer B → P3 P4 P5
+
+Consumer B stops
+        ↓
+consumer-group membership changes
+        ↓
+Kafka rebalances assignments
+        ↓
+Consumer A → P0 P1 P2 P3 P4 P5
+```
+
+## What this proves
+1. Starting another consumer process with the same `group.id` adds another member to the same consumer group.
+2. Kafka redistributes partitions when group membership changes.
+3. A partition is assigned to only one active consumer within a group at a time.
+4. With six partitions and two consumers, Kafka distributed three partitions to each consumer in this run.
+5. Empty partitions still participate in consumer-group assignment.
+6. When one consumer leaves, Kafka rebalances and transfers its partitions to the remaining consumer.
+7. The application did not need to manually reassign partitions; Kafka handled the new ownership automatically.
+
+## Production lesson
+Consumer groups provide horizontal scaling and failover. When a consumer instance joins or leaves, Kafka coordinates a rebalance so partitions continue to have an active owner. Rebalances can temporarily interrupt processing, so production consumers should be designed for safe retries, idempotent downstream processing, and correct offset handling.
 
 ## Interview takeaway
-> A consumer group consists of multiple consumer instances sharing the same group ID. Kafka assigns each partition to only one consumer in that group at a time. When a consumer joins or leaves, Kafka rebalances partition ownership across the active members.
+> A consumer group consists of multiple consumer instances sharing the same group ID. Kafka assigns each partition to only one consumer in that group at a time. When a consumer joins or leaves, Kafka rebalances partition ownership across the active members. In this lab, two consumers split six partitions 3/3; after one consumer stopped, the remaining consumer automatically received all six partitions.
