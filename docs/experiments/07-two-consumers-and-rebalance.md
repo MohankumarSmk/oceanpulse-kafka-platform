@@ -58,7 +58,7 @@ Kafka assigns **partitions**, not only partitions that currently contain records
 
 ## Phase 2 — Stop one consumer and observe rebalance
 
-The consumer owning partitions 3, 4 and 5 was stopped with `Ctrl+C`.
+One of the two active consumers was stopped with `Ctrl+C`.
 
 The group was inspected again:
 
